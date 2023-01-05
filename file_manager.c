@@ -7,28 +7,37 @@
 #include <fcntl.h>
 #include <pthread.h>
 
-#define PIPE_NAME "file_manager"
+#define PIPE_NAME "/tmp/file_manager"
 #define MAX_FILES 10
-
-void create_pipe();
+#define BUFFER_LENGTH 1024
+int _read_pipe(char *pipeName, char *buffer);
+int _write_pipe(char *pipeName, char *msg);
+void create_pipe(char *pipeName);
 void *communicate_with_client(void *arg);
 void handle_create_command(char *file_name, char *pipeName);
-void handle_delete_command(int index, char *pipeName);
-void handle_read_command(int index, char *pipeName);
-void handle_write_command(int index, char *data, char *pipeName);
+void handle_delete_command(char *file_name, char *pipeName);
+void handle_read_command(char *file_name, char *pipeName);
+void handle_write_command(char *file_name, char *content, char *pipeName);
 void listen_commands();
 int get_empty_index();
 
-pthread_t *threadList[5];
-char *file_list[10]; // dosya isimlerini tutacak dizi
-pthread_t thread_id; // thread id
+typedef struct
+{
+    pthread_t thread;
+    char *name;
+    int status;
+} Pipe;
+
+Pipe pipeList[5];
+
+char *file_list[MAX_FILES]; // dosya isimlerini tutacak dizi
 
 // named pipe'ı oluşturan fonksiyon
-void create_pipe()
+void create_pipe(char *pipeName)
 {
     // named pipe oluşturma işlemleri
-    unlink(PIPE_NAME);               // eğer pipe zaten oluşturulmuşsa silinir
-    if (mkfifo(PIPE_NAME, 0666) < 0) // pipe oluşturulur
+    unlink(pipeName);               // eğer pipe zaten oluşturulmuşsa silinir
+    if (mkfifo(pipeName, 0666) < 0) // pipe oluşturulur
     {
         perror("mkfifo");
         exit(1);
@@ -52,96 +61,96 @@ int get_empty_index()
     return -1;
 }
 
-// file_client ile iletişim kuracak thread fonksiyonu
-void *communicate_with_client(void *arg)
+int get_file_index(char *fileName)
 {
-    // file_client ile iletişim kurma işlemleri
-    char pipeName[1];
-    char *temp = (char *)arg;
-    strcpy(pipeName, temp);
 
-    
-    char file_name[100]; // dosya ismini tutacak dizi
-    int index;           // dosya indexini tutacak değişken
-    char data[1000];     // dosyadaki veriyi tutacak dizi
-
-    // named pipe oluşturma işlemleri
-    unlink(pipeName);               // eğer pipe zaten oluşturulmuşsa silinir
-    if (mkfifo(pipeName, 0666) < 0) // pipe oluşturulur
+    for (int i = 0; i < MAX_FILES; i++)
     {
-        perror("mkfifo");
-        exit(1);
+        if (file_list[i] && strcmp(file_list[i], fileName) == 0)
+        {
+            return i;
+        }
     }
 
-    write_pipe(PIPE_NAME, pipeName);
+    return -1;
+}
+
+// dosya adını kontrol eden fonksiyon
+int isFileExist(char *fileName)
+{
+    printf("is file exist\n");
+    for (int i = 0; i < MAX_FILES; i++)
+    {
+        int len = strlen(fileName);
+
+        if (file_list[i] != NULL)
+        {
+            if (strcmp(file_list[i], fileName) == 0)
+            {
+                return 1;
+            }
+        }
+        printf("end loop\n");
+    }
+
+    return 0;
+}
+
+// file_client ile iletişim kuracak thread fonksiyonu
+void *communicate_with_client(void *index)
+{
+    // file_client ile iletişim kurma işlemleri
+    int *i = (int *)index;
+    char *pipeName = pipeList[*i].name;
+
+    printf("pipe name => %s\n", pipeName);
+    char file_name[100]; // dosya ismini tutacak dizi
+    // int index;           // dosya indexini tutacak değişken
+    char content[1024]; // dosyadaki veriyi tutacak dizi
+    char command[1024];
+    char buffer[BUFFER_LENGTH]; // komutu tutacak dizi
+
+    // named pipe oluşturma işlemleri
+    create_pipe(pipeName);
 
     while (1)
     {
-        char command[256];    // komutu tutacak dizi
-
         // file_client'tan komut okunur
-        if (read(pipeName, command, sizeof(command)) < 0)
-        {
-            perror("read");
-            exit(1);
-        }
+        _read_pipe(pipeName, buffer);
 
-        
-
+        sscanf(buffer, "%s %s %[^\n]", command, file_name, content);
+        printf("buffer =>%s\ncommand => %s\nfile_name => %s\ncontent => %s\n", buffer, command, file_name, content);
         if (strcmp(command, "create") == 0) // create komutu
         {
-            // file_client'tan dosya ismi okunur
-            if (read(pipeName, file_name, sizeof(file_name)) < 0)
-            {
-                perror("read");
-                exit(1);
-            }
-
             handle_create_command(file_name, pipeName); // create işlemi yapılır
         }
         else if (strcmp(command, "delete") == 0) // delete komutu
         {
-            // file_client'tan dosya indexi okunur
-            if (read(pipeName, &index, sizeof(index)) < 0)
-            {
-                perror("read");
-                exit(1);
-            }
-
-            handle_delete_command(index, pipeName); // delete işlemi yapılır
+            handle_delete_command(file_name, pipeName); // delete işlemi yapılır
         }
         else if (strcmp(command, "read") == 0) // read komutu
         {
             // file_client'tan dosya indexi okunur
-            if (read(pipeName, &index, sizeof(index)) < 0)
-            {
-                perror("read");
-                exit(1);
-            }
-
-            handle_read_command(index, pipeName); // read işlemi yapılır
+            handle_read_command(file_name, pipeName); // read işlemi yapılır
         }
         else if (strcmp(command, "write") == 0) // write komutu
         {
             // file_client'tan dosya indexi ve veri okunur
-            if (read(pipeName, &index, sizeof(index)) < 0 || read(pipeName, data, sizeof(data)) < 0)
-            {
-                perror("read");
-                exit(1);
-            }
-
-            handle_write_command(index, data, pipeName); // write işlemi yapılır
+            handle_write_command(file_name, content, pipeName); // write işlemi yapılır
         }
         else if (strcmp(command, "exit") == 0) // exit komutu
         {
+            printf("SERVER exit received\n");
+            pipeList[*i].status = 0;
             break; // iletişim koparılır ve döngüden çıkılır
         }
         else // bilinmeyen komut
         {
+            _write_pipe(pipeName, "gecersiz komut");
             printf("Bilinmeyen komut: %s\n", command);
         }
     }
-
+    free(index);
     return NULL;
 }
 
@@ -149,230 +158,155 @@ void *communicate_with_client(void *arg)
 void handle_create_command(char *file_name, char *pipeName)
 {
     // dosya ismi boş değilse
-    if (strlen(file_name) > 0)
+    if (strlen(file_name) <= 0)
     {
-        // file_list dizisi içinde dosya ismi aranır
-        int index = -1;
-        for (int i = 0; i < MAX_FILES; i++)
-        {
-            if (strcmp(file_list[i], file_name) == 0)
-            {
-                index = i;
-                break;
-            }
-        }
-        if (index == -1) // dosya ismi bulunamadıysa
-        {
-            // boş index bulunur
-            index = get_empty_index();
-
-            if (index != -1) // boş index bulunmuşsa
-            {
-                // file_list'e dosya ismi eklenir ve dosya oluşturulur
-                strcpy(file_list[index], file_name);
-                FILE *fp = fopen(file_name, "w");
-                if (fp == NULL)
-                {
-                    perror("fopen");
-                    exit(1);
-                }
-                fclose(fp);
-
-                // file_client'a başarılı mesajı gönderilir
-                char response[20] = "Basarili";
-                if (write(pipeName, response, sizeof(response)) < 0)
-                {
-                    perror("write");
-                    exit(1);
-                }
-            }
-            else // boş index bulunamadıysa
-            {
-                // file_client'a dolu mesajı gönderilir
-                char response[20] = "Dolu";
-                if (write(pipeName, response, sizeof(response)) < 0)
-                {
-                    perror("write");
-                    exit(1);
-                }
-            }
-        }
-        else // dosya ismi bulunmuşsa
-        {
-            // file_client'a zaten var mesajı gönderilir
-            char response[20] = "Zaten var";
-            if (write(pipeName, response, sizeof(response)) < 0)
-            {
-                perror("write");
-                exit(1);
-            }
-        }
+        _write_pipe(pipeName, "basarisiz");
+        return;
     }
-    else // dosya ismi boşsa
+
+    if (isFileExist(file_name))
     {
-        // file_client'a boş mesajı gönderilir
-        char response[20] = "Boş";
-        if (write(pipeName, response, sizeof(response)) < 0)
-        {
-            perror("write");
-            exit(1);
-        }
+        _write_pipe(pipeName, "dosya mevcut");
+        return;
     }
+
+    // file_list dizisi içinde dosya ismi aranır
+    int index = get_empty_index();
+
+    if (index == -1) // dosya ismi bulunamadıysa
+    {
+        _write_pipe(pipeName, "basarisiz");
+        return;
+    }
+
+    // file_list'e dosya ismi eklenir ve dosya oluşturulur
+    file_list[index] = (char *)malloc(1024);
+    memcpy(file_list[index], file_name, strlen(file_name) + 1);
+
+    FILE *fp = fopen(file_name, "w");
+    if (fp == NULL)
+    {
+        perror("fopen");
+        exit(1);
+    }
+    fclose(fp);
+
+    // file_client'a başarılı mesajı gönderilir
+    _write_pipe(pipeName, "Basarili");
 }
 
 // delete komutunu işleyen fonksiyon
-void handle_delete_command(int index, char *pipeName)
+void handle_delete_command(char *file_name, char *pipeName)
 {
-    // index geçerli değilse
-    if (index < 0 || index >= MAX_FILES || strlen(file_list[index]) == 0)
+    int index = get_file_index(file_name);
+    if (index == -1)
     {
-        // file_client'a geçersiz mesajı gönderilir
-        char response[20] = "Geçersiz";
-        if (write(pipeName, response, sizeof(response)) < 0)
-        {
-            perror("write");
-            exit(1);
-        }
+        _write_pipe(pipeName, "dosya mevcut degil");
+        return;
     }
-    else // index geçerli ise
-    {
-        // dosya silinir ve file_list'ten silinir
-        if (remove(file_list[index]) == 0)
-        {
-            memset(file_list[index], 0, sizeof(file_list[index]));
 
-            // file_client'a başarılı mesajı gönderilir
-            char response[20] = "Başarılı";
-            if (write(pipeName, response, sizeof(response)) < 0)
-            {
-                perror("write");
-                exit(1);
-            }
-        }
-        else // dosya silinemediys
-        {
-            // file_client'a hata mesajı gönderilir
-            char response[20] = "Hata";
-            if (write(pipeName, response, sizeof(response)) < 0)
-            {
-                perror("write");
-                exit(1);
-            }
-        }
-    }
+    //  Dosya ismini dosya listesi dizisinden sil
+    free(file_list[index]);
+    file_list[index] = NULL;
+
+    unlink(file_name);
+
+    _write_pipe(pipeName, "dosya silindi");
 }
 
 // read komutunu işleyen fonksiyon
-void handle_read_command(int index, char *pipeName)
+void handle_read_command(char *file_name, char *pipeName)
 {
-    // index geçerli bir index mi?
-    if (index >= 0 && index < MAX_FILES)
+    if (!isFileExist(file_name))
     {
-        // dosya ismi file_list dizisinde var mı?
-        if (strlen(file_list[index]) > 0)
-        {
-            // dosya açılır
-            FILE *fp = fopen(file_list[index], "r");
-            if (fp == NULL)
-            {
-                perror("fopen");
-                exit(1);
-            }
-
-            // dosyadaki veri okunur
-            char data[1000];
-            fgets(data, sizeof(data), fp);
-            fclose(fp);
-
-            // file_client'a veri gönderilir
-            if (write(pipeName, data, sizeof(data)) < 0)
-            {
-                perror("write");
-                exit(1);
-            }
-        }
-        else // dosya ismi yoksa
-        {
-            // file_client'a yok mesajı gönderilir
-            char response[20] = "Yok";
-            if (write(pipeName, response, sizeof(response)) < 0)
-            {
-                perror("write");
-                exit(1);
-            }
-        }
+        _write_pipe(pipeName, "dosya mevcut degil");
+        return;
     }
-    else // index geçersizse
+    // Dosyayı aç
+    FILE *fd;
+    fd = fopen(file_name, "r");
+    if (!fd)
     {
-        // file_client'a geçersiz mesajı gönderilir
-        char response[20] = "Geçersiz";
-        if (write(pipeName, response, sizeof(response)) < 0)
-        {
-            perror("write");
-            exit(1);
-        }
+        _write_pipe(pipeName, "dosya acilamadi");
+        return;
     }
+
+    char content[2048];
+    int index = 0;
+    char c;
+    while ((c = fgetc(fd)) != EOF)
+    {
+        content[index++] = c;
+    }
+    content[index] = '\0';
+
+    _write_pipe(pipeName, content);
 }
 
 // write komutunu işleyen fonksiyon
-void handle_write_command(int index, char *data, char *pipeName)
+void handle_write_command(char *file_name, char *content, char *pipeName)
 {
-    // dosya indexi geçerliysse
-    if (index >= 0 && index < MAX_FILES)
+    // int index = get_file_index(&file_name);
+    // printf("index bulundu");
+    if (!isFileExist(file_name))
     {
-        // file_list'ten dosya ismi okunur
-        char file_name[100];
-        strcpy(file_name, file_list[index]);
-
-        // dosya açılır
-        FILE *fp = fopen(file_name, "w");
-        if (fp == NULL)
-        {
-            perror("fopen");
-            exit(1);
-        }
-
-        // dosyaya veri yazılır
-        fprintf(fp, "%s", data);
-
-        // dosya kapatılır
-        fclose(fp);
-
-        // file_client'a başarılı mesajı gönderilir
-        char response[20] = "Basarili";
-        if (write(pipeName, response, sizeof(response)) < 0)
-        {
-            perror("write");
-            exit(1);
-        }
+        _write_pipe(pipeName, "dosya mevcut degil");
+        return;
     }
-    else // dosya indexi geçersizse
+    // Dosyayı aç
+    FILE *fd;
+    fd = fopen(file_name, "a");
+    if (!fd)
     {
-        // file_client'a geçersiz index mesajı gönderilir
-        char response[20] = "Geçersiz index";
-        if (write(pipeName, response, sizeof(response)) < 0)
-        {
-            perror("write");
-            exit(1);
-        }
+        _write_pipe(pipeName, "dosya acilamadi");
+        return;
     }
+
+    // Veriyi dosyaya yaz
+    fprintf(fd, "%s", content);
+    fprintf(fd, "%s", "\n");
+
+    // sonucu yazdir
+    _write_pipe(pipeName, "dosyaya yazma islemi basarili");
+
+    fclose(fd);
 }
 
-void write_pipe(char *pipeName, char *msg)
+int _write_pipe(char *pipeName, char *msg)
 {
     int fd = open(pipeName, O_WRONLY);
-    if (fd< 0)
+    if (fd < 0)
     {
         perror("open");
-        return;
+        return -1;
     }
 
-    if (write(pipeName, msg, sizeof(msg)) < 0)
+    if (write(fd, msg, strlen(msg) + 1) < 0)
     {
         perror("write");
-        return;
+        return -1;
     }
     close(fd);
+    return 0;
+}
+
+int _read_pipe(char *pipeName, char *buffer)
+{
+    int fd = open(pipeName, O_RDONLY);
+    if (fd < 0)
+    {
+        perror("open");
+        return -1;
+    }
+    size_t len = read(fd, buffer, BUFFER_LENGTH);
+    if (len < 0)
+    {
+        perror("write");
+        return -1;
+    }
+    close(fd);
+
+    return len;
 }
 
 void listen_commands()
@@ -381,106 +315,48 @@ void listen_commands()
     while (1)
     {
         // file_client'tan komut okunur
-        char command[10];
-        if (read(PIPE_NAME, command, sizeof(command)) < 0)
+        char command[BUFFER_LENGTH];
+        _read_pipe(PIPE_NAME, command);
+
+        int connectionStatus = 0;
+        for (size_t i = 0; i < 5; i++)
         {
-            perror("read");
-            exit(1);
+            if (!pipeList[i].status)
+            {
+                _write_pipe(PIPE_NAME, pipeList[i].name);
+                int *param = malloc(sizeof(int));
+                *param = i;
+                pthread_create(&pipeList[i].thread, NULL, communicate_with_client, param);
+                pipeList[i].status = 1;
+                connectionStatus = 1;
+                break;
+            }
         }
 
-        // komut "create" ise dosya oluşturma işlemi yapılır
-        if (strcmp(command, "create") == 0)
+        if (!connectionStatus)
         {
-            // file_client'tan dosya ismi okunur
-            char file_name[100];
-            if (read(PIPE_NAME, file_name, sizeof(file_name)) < 0)
-            {
-                perror("read");
-                exit(1);
-            }
-
-            handle_create_command(file_name, PIPE_NAME);
-        }
-        // komut "delete" ise dosya silme işlemi yapılır
-        else if (strcmp(command, "delete") == 0)
-        {
-            // file_client'tan dosya indexi okunur
-            int index;
-            if (read(PIPE_NAME, &index, sizeof(index)) < 0)
-            {
-                perror("read");
-                exit(1);
-            }
-
-            handle_delete_command(index,PIPE_NAME);
-        }
-        // komut "read" ise dosya okuma işlemi yapılır
-        else if (strcmp(command, "read") == 0)
-        {
-            // file_client'tan dosya indexi okunur
-            int index;
-            if (read(PIPE_NAME, &index, sizeof(index)) < 0)
-            {
-                perror("read");
-                exit(1);
-            }
-
-            handle_read_command(index, PIPE_NAME);
-        }
-        // komut "write" ise dosya yazma işlemi yapılır
-        else if (strcmp(command, "write") == 0)
-        {
-            // file_client'tan dosya indexi ve veri okunur
-            int index;
-            char data[1000];
-            if (read(PIPE_NAME, &index, sizeof(index)) < 0 || read(PIPE_NAME, data, sizeof(data)) < 0)
-            {
-                perror("read");
-                exit(1);
-            }
-
-            handle_write_command(index, data, PIPE_NAME);
-        }
-        // komut "exit" ise iletişim kesilir ve döngüden çıkılır
-        else if (strcmp(command, "exit") == 0)
-        {
-            break;
-        }
-        // bilinmeyen bir komut ise hata mesajı gönderilir
-        else
-        {
-            char response[20] = "Hatalı komut";
-            if (write(PIPE_NAME, response, sizeof(response)) < 0)
-            {
-                perror("write");
-                exit(1);
-            }
+            printf("not enough pipe\n");
+            _write_pipe(PIPE_NAME, "not enough pipe");
         }
     }
 }
+
 int main()
 {
-    create_pipe(); // pipe oluşturulur
 
-    // file_client ile iletişim kuracak threadler oluşturulur
-    for (int i = 0; i < 5; i++)
+    for (size_t i = 0; i < 5; i++)
     {
-        pthread_t thread; // thread değişkeni
-
-        char pipeName[1];
-        sprintf(pipeName, "%d", i);
-
-        if (pthread_create(&thread, NULL, communicate_with_client, (void *)pipeName) != 0)
-        {
-            perror("pthread_create");
-            exit(1);
-        }
-        threadList[i] = thread;
+        file_list[i] = NULL;
     }
 
+    create_pipe(PIPE_NAME); // pipe oluşturulur
     for (int i = 0; i < 5; i++)
     {
-        pthread_join(threadList[i], NULL);
+        pipeList[i].status = 0;
+        char *name = malloc(25);
+        sprintf(name, "pipe_%d", i);
+        printf("created pipe name => %s\n", name);
+        pipeList[i].name = name;
     }
 
     // file_manager komutlarını dinlemeye başlar

@@ -6,9 +6,12 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#define PIPE_NAME "file_manager"
+#define PIPE_NAME "/tmp/file_manager"
+#define BUFFER_LENGTH 1024
 
-int write_pipe(char *pipeName, char *msg)
+char buffer[BUFFER_LENGTH];
+
+int _write_pipe(char *pipeName, char *msg)
 {
     int fd = open(pipeName, O_WRONLY);
     if (fd < 0)
@@ -17,79 +20,69 @@ int write_pipe(char *pipeName, char *msg)
         return -1;
     }
 
-    if (write(pipeName, msg, sizeof(msg)) < 0)
+    if (write(fd, msg, strlen(msg) + 1) < 0)
     {
         perror("write");
         return -1;
     }
     close(fd);
-
+    printf("%s sended to pipe\n", msg);
     return 0;
 }
 
-int read_pipe(char *pipeName, char *msg)
+int _read_pipe(char *pipeName)
 {
-    int fd = open(pipeName, O_WRONLY);
+    int fd = open(pipeName, O_RDONLY);
     if (fd < 0)
     {
         perror("open");
         return -1;
     }
-
-    if (read(pipeName, msg, sizeof(msg)) < 0)
+    size_t len = read(fd, buffer, BUFFER_LENGTH);
+    if (len < 0)
     {
         perror("write");
         return -1;
     }
     close(fd);
 
-    return 0;
+    return len;
 }
 
 int main()
 {
     // file_manager ile iletişim kurmak için named pipe'ı açın
-    int pipe_fd = open(PIPE_NAME, O_WRONLY);
-    if (pipe_fd < 0)
-    {
-        perror("open");
-        exit(1);
-    }
+    _write_pipe(PIPE_NAME, "baglan");
 
     // file_manager'tan gelen işlem sonuçlarını alın
-    char response[10];
-    if (read(pipe_fd, response, sizeof(response)) < 0)
-    {
-        perror("read");
-        exit(1);
-    }
+    size_t pipeNameLen = _read_pipe(PIPE_NAME);
+    char pipeName[pipeNameLen];
 
-    close(pipe_fd);
+    strcpy(pipeName, buffer);
+
+    if (strcmp("not enough pipe", pipeName) == 0)
+    {
+        printf("CLIENT: not enough pipe, closing...");
+        return 0;
+    }
 
     // kullanıcıdan girdi alarak file_manager'a gönderilecek komutları işleyin
     while (1)
     {
         // komutu alın
-        char command[256];
-        printf("Enter command (create, delete, read, write, exit): ");
-        scanf("%s", command);
+        printf("Enter command (create, delete, read, write, exit): \n");
+        fgets(buffer, BUFFER_LENGTH, stdin);
+        buffer[strcspn(buffer, "\n")] = '\0';
+        printf("entered buffer =>%s\n", buffer);
 
+        _write_pipe(pipeName, buffer);
         // "exit" komutu işlendiğinde döngüden çıkın
-        if (strcmp(command, "exit") == 0)
-        {
-            write_pipe(response, "exit");
+        if (strcmp(buffer, "exit") == 0)
             break;
-        }
-
-        write_pipe(response, command);
 
         // işlem sonucunu alın ve yazdırın
-        if (read(pipe_fd, response, sizeof(response)) < 0)
-        {
-            perror("read");
-            exit(1);
-        }
-        printf("Result: %s\n", response);
+        _read_pipe(pipeName);
+        printf("Result: %s\n", buffer);
     }
 
     return 0;
