@@ -10,6 +10,8 @@
 #define PIPE_NAME "/tmp/file_manager"
 #define MAX_FILES 10
 #define BUFFER_LENGTH 1024
+
+pthread_mutex_t mutex;
 int _read_pipe(char *pipeName, char *buffer);
 int _write_pipe(char *pipeName, char *msg);
 void create_pipe(char *pipeName);
@@ -122,21 +124,29 @@ void *communicate_with_client(void *index)
         printf("buffer =>%s\ncommand => %s\nfile_name => %s\ncontent => %s\n", buffer, command, file_name, content);
         if (strcmp(command, "create") == 0) // create komutu
         {
+            pthread_mutex_lock(&mutex);
             handle_create_command(file_name, pipeName); // create işlemi yapılır
+            pthread_mutex_unlock(&mutex);
         }
         else if (strcmp(command, "delete") == 0) // delete komutu
         {
+            pthread_mutex_lock(&mutex);
             handle_delete_command(file_name, pipeName); // delete işlemi yapılır
+            pthread_mutex_unlock(&mutex);
         }
         else if (strcmp(command, "read") == 0) // read komutu
         {
+            pthread_mutex_lock(&mutex);
             // file_client'tan dosya indexi okunur
             handle_read_command(file_name, pipeName); // read işlemi yapılır
+            pthread_mutex_unlock(&mutex);
         }
         else if (strcmp(command, "write") == 0) // write komutu
         {
+            pthread_mutex_lock(&mutex);
             // file_client'tan dosya indexi ve veri okunur
             handle_write_command(file_name, content, pipeName); // write işlemi yapılır
+            pthread_mutex_unlock(&mutex);
         }
         else if (strcmp(command, "exit") == 0) // exit komutu
         {
@@ -343,6 +353,7 @@ void listen_commands()
 
 int main()
 {
+    pthread_mutex_init(&mutex, NULL);
 
     for (size_t i = 0; i < 5; i++)
     {
@@ -362,5 +373,6 @@ int main()
     // file_manager komutlarını dinlemeye başlar
     listen_commands();
 
+    pthread_mutex_destroy(&mutex);
     return 0;
 }
