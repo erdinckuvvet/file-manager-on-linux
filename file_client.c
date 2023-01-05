@@ -51,36 +51,40 @@ int _read_pipe(char *pipeName)
 
 int main()
 {
-    // file_manager ile iletişim kurmak için named pipe'ı açın
+    // file_manager ile iletişim kurmak için named pipe açılıyor
+
     _write_pipe(PIPE_NAME, "baglan");
 
-    // file_manager'tan gelen işlem sonuçlarını alın
+    // file_manager'tan gelen işlem sonuçlarını alır uzunluğunu da bir değişkende tutar
     size_t pipeNameLen = _read_pipe(PIPE_NAME);
     char pipeName[pipeNameLen];
 
+    // gelen komut pipeName olarak alınır
     strcpy(pipeName, buffer);
 
+    // tüm pipelar kullanımda ise
     if (strcmp("not enough pipe", pipeName) == 0)
     {
         printf("CLIENT: not enough pipe, closing...");
         return 0;
     }
 
-    // kullanıcıdan girdi alarak file_manager'a gönderilecek komutları işleyin
+    // kullanıcıdan girdi alarak file_manager'a gönderilecek komutları işle
     while (1)
     {
-        // komutu alın
+        // komutu al
         printf("Enter command (create, delete, read, write, exit): \n");
         fgets(buffer, BUFFER_LENGTH, stdin);
-        buffer[strcspn(buffer, "\n")] = '\0';
+        buffer[strcspn(buffer, "\n")] = '\0'; //\n ilk görüldüğü yeri \0 ile değiştirir
         printf("entered buffer =>%s\n", buffer);
 
         _write_pipe(pipeName, buffer);
-        // "exit" komutu işlendiğinde döngüden çıkın
+
+        // "exit" komutu işlendiğinde döngüden çık
         if (strcmp(buffer, "exit") == 0)
             break;
 
-        // işlem sonucunu alın ve yazdırın
+        // işlem sonucunu al ve yazdır
         _read_pipe(pipeName);
         printf("Result: %s\n", buffer);
     }

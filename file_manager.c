@@ -23,6 +23,7 @@ void handle_write_command(char *file_name, char *content, char *pipeName);
 void listen_commands();
 int get_empty_index();
 
+// pipe struct
 typedef struct
 {
     pthread_t thread;
@@ -49,20 +50,21 @@ void create_pipe(char *pipeName)
 // bos index bulan fonksiyon
 int get_empty_index()
 {
-    // Find an empty slot in the file list
+    //  file list içinde boş index bulunur
     for (int i = 0; i < MAX_FILES; i++)
     {
         if (file_list[i] == NULL)
         {
-            // Return the index of the empty slot
+            // mevcutsa index değeri döndürülür
             return i;
         }
     }
 
-    // If no empty slot is found, return -1
+    // boş index yoksa -1 değeri döndürülür
     return -1;
 }
 
+// adı verilen dosyanın indexini döndüren fonksiyon
 int get_file_index(char *fileName)
 {
 
@@ -80,7 +82,6 @@ int get_file_index(char *fileName)
 // dosya adını kontrol eden fonksiyon
 int isFileExist(char *fileName)
 {
-    printf("is file exist\n");
     for (int i = 0; i < MAX_FILES; i++)
     {
         int len = strlen(fileName);
@@ -92,7 +93,6 @@ int isFileExist(char *fileName)
                 return 1;
             }
         }
-        printf("end loop\n");
     }
 
     return 0;
@@ -105,14 +105,13 @@ void *communicate_with_client(void *index)
     int *i = (int *)index;
     char *pipeName = pipeList[*i].name;
 
-    printf("pipe name => %s\n", pipeName);
-    char file_name[100]; // dosya ismini tutacak dizi
-    // int index;           // dosya indexini tutacak değişken
-    char content[1024]; // dosyadaki veriyi tutacak dizi
-    char command[1024];
-    char buffer[BUFFER_LENGTH]; // komutu tutacak dizi
+    printf("client connected to => %s\n", pipeName);
+    char file_name[100];        // dosya ismini tutacak dizi
+    char content[1024];         // dosyadaki veriyi tutacak dizi
+    char command[1024];         // komutu tutacak dizi
+    char buffer[BUFFER_LENGTH]; // pipedan gelen ham veriyi tutacak dizi
 
-    // named pipe oluşturma işlemleri
+    // named pipe oluşturulur
     create_pipe(pipeName);
 
     while (1)
@@ -120,8 +119,10 @@ void *communicate_with_client(void *index)
         // file_client'tan komut okunur
         _read_pipe(pipeName, buffer);
 
+        // tokenizasyon
         sscanf(buffer, "%s %s %[^\n]", command, file_name, content);
         printf("buffer =>%s\ncommand => %s\nfile_name => %s\ncontent => %s\n", buffer, command, file_name, content);
+
         if (strcmp(command, "create") == 0) // create komutu
         {
             pthread_mutex_lock(&mutex);
@@ -167,23 +168,24 @@ void *communicate_with_client(void *index)
 // create komutunu işleyen fonksiyon
 void handle_create_command(char *file_name, char *pipeName)
 {
-    // dosya ismi boş değilse
+    // dosya ismi boş ise
     if (strlen(file_name) <= 0)
     {
         _write_pipe(pipeName, "basarisiz");
         return;
     }
 
+    // dosya zaten mevcutsa
     if (isFileExist(file_name))
     {
         _write_pipe(pipeName, "dosya mevcut");
         return;
     }
 
-    // file_list dizisi içinde dosya ismi aranır
+    // boş index bulunur
     int index = get_empty_index();
 
-    if (index == -1) // dosya ismi bulunamadıysa
+    if (index == -1) // dosya listesi dolu ise
     {
         _write_pipe(pipeName, "basarisiz");
         return;
@@ -193,6 +195,7 @@ void handle_create_command(char *file_name, char *pipeName)
     file_list[index] = (char *)malloc(1024);
     memcpy(file_list[index], file_name, strlen(file_name) + 1);
 
+    // dosya oluşturulur
     FILE *fp = fopen(file_name, "w");
     if (fp == NULL)
     {
@@ -208,7 +211,10 @@ void handle_create_command(char *file_name, char *pipeName)
 // delete komutunu işleyen fonksiyon
 void handle_delete_command(char *file_name, char *pipeName)
 {
+    // dosyanın listedeki indexini bul
     int index = get_file_index(file_name);
+
+    // mevcut değilse
     if (index == -1)
     {
         _write_pipe(pipeName, "dosya mevcut degil");
@@ -227,11 +233,13 @@ void handle_delete_command(char *file_name, char *pipeName)
 // read komutunu işleyen fonksiyon
 void handle_read_command(char *file_name, char *pipeName)
 {
+    // dosya mevcut değilse
     if (!isFileExist(file_name))
     {
         _write_pipe(pipeName, "dosya mevcut degil");
         return;
     }
+
     // Dosyayı aç
     FILE *fd;
     fd = fopen(file_name, "r");
@@ -244,6 +252,8 @@ void handle_read_command(char *file_name, char *pipeName)
     char content[2048];
     int index = 0;
     char c;
+
+    // dosyadan oku
     while ((c = fgetc(fd)) != EOF)
     {
         content[index++] = c;
@@ -256,14 +266,14 @@ void handle_read_command(char *file_name, char *pipeName)
 // write komutunu işleyen fonksiyon
 void handle_write_command(char *file_name, char *content, char *pipeName)
 {
-    // int index = get_file_index(&file_name);
-    // printf("index bulundu");
+    // dosya mevcut değilse
     if (!isFileExist(file_name))
     {
         _write_pipe(pipeName, "dosya mevcut degil");
         return;
     }
-    // Dosyayı aç
+
+    // Dosyayı aç (append)
     FILE *fd;
     fd = fopen(file_name, "a");
     if (!fd)
@@ -284,24 +294,31 @@ void handle_write_command(char *file_name, char *content, char *pipeName)
 
 int _write_pipe(char *pipeName, char *msg)
 {
+    // pipe yazdırma modunda açılır
     int fd = open(pipeName, O_WRONLY);
+
+    // pipe açma hatası
     if (fd < 0)
     {
         perror("open");
         return -1;
     }
 
+    // yazdırma hatası
     if (write(fd, msg, strlen(msg) + 1) < 0)
     {
         perror("write");
         return -1;
     }
+
+    // işlem bittiyse pipe kapatılır
     close(fd);
     return 0;
 }
 
 int _read_pipe(char *pipeName, char *buffer)
 {
+    // pipe okuma modunda açılır
     int fd = open(pipeName, O_RDONLY);
     if (fd < 0)
     {
@@ -331,8 +348,11 @@ void listen_commands()
         int connectionStatus = 0;
         for (size_t i = 0; i < 5; i++)
         {
+            // pipe listesinde boş yer varsa
+            // 5'den az client olma durumunda
             if (!pipeList[i].status)
             {
+                // iletişim kuracağı pipe adı cliente gönderilir ve thread açılarak iletişim başlar
                 _write_pipe(PIPE_NAME, pipeList[i].name);
                 int *param = malloc(sizeof(int));
                 *param = i;
@@ -343,6 +363,7 @@ void listen_commands()
             }
         }
 
+        // 5 client mevcutsa
         if (!connectionStatus)
         {
             printf("not enough pipe\n");
@@ -353,6 +374,7 @@ void listen_commands()
 
 int main()
 {
+    // mutex yapısı oluşturuldu
     pthread_mutex_init(&mutex, NULL);
 
     for (size_t i = 0; i < 5; i++)
@@ -360,19 +382,20 @@ int main()
         file_list[i] = NULL;
     }
 
-    create_pipe(PIPE_NAME); // pipe oluşturulur
+    create_pipe(PIPE_NAME); // 5 adet pipe oluşturulur
     for (int i = 0; i < 5; i++)
     {
-        pipeList[i].status = 0;
+        pipeList[i].status = 0; // pipe durumu çalışmıyor olarak ilk değerini alır
         char *name = malloc(25);
-        sprintf(name, "pipe_%d", i);
+        sprintf(name, "pipe_%d", i); // pipe için uniq isim atanır
         printf("created pipe name => %s\n", name);
-        pipeList[i].name = name;
+        pipeList[i].name = name; // pipe adı listeye kaydedilir
     }
 
-    // file_manager komutlarını dinlemeye başlar
+    // file_manager komutları dinlemeye başlar
     listen_commands();
 
+    // mutex ortadan kaldırıldı
     pthread_mutex_destroy(&mutex);
     return 0;
 }
